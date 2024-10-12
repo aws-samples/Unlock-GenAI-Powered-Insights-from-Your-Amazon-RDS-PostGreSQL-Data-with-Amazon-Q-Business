@@ -1,0 +1,382 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates a VPC with public and private subnets, a Postgres RDS instance in the private subnet, and a bastion host EC2 instance in the public subnet.
+
+Parameters:
+  DatabaseUsername:
+    Type: String
+    Description: The username for the database must begin with a letter and contain only alphanumeric characters. It cannot be "admin".
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: The username must begin with a letter and contain only alphanumeric characters. It cannot be "admin".
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the bastion host
+
+  Conditions:
+    IsUsWest2: !Equals [!Ref 'AWS::Region', 'us-west-2']
+    IsUsEast1: !Equals [!Ref 'AWS::Region', 'us-east-1']
+
+Resources:
+  # VPC and Networking components
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-VPC
+  
+  # Public subnet for bastion host
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicSubnet
+  # Private subnets for RDS instance
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnet1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnet2
+  # Internet Gateway for public subnet
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-IGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  
+  # Route table for public subnet
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicRouteTable
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+  
+  # Route table for private subnets
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateRouteTable
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # NAT Gateway for private subnet internet access
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+
+  PrivateRouteToNat:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  # Secrets Manager for database credentials
+  DatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'QBusiness-${AWS::StackName}-db-credentials'
+      Description: RDS database credentials
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DatabaseUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\'
+
+  # RDS Instance and related resources
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets available for the RDS DB
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:password}}'
+      DBName: sampledb
+      DBInstanceClass: db.t3.large
+      AllocatedStorage: 20
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      BackupRetentionPeriod: 7
+      PubliclyAccessible: false
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MultiAZ: false
+      StorageEncrypted: true
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows access to the DB from the Bastion host
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref BastionSecurityGroup
+
+  # Bastion Host
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: DBInstance
+    Properties:
+      ImageId: !If
+        - IsUsWest2
+        - ami-0d081196e3df05f4d
+        - !If
+          - IsUsEast1
+          - ami-0fff1b9a61dec8a5f
+          - !Ref 'AWS::NoValue'
+      InstanceType: t3.medium
+      KeyName: !Ref KeyPairName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref BastionSecurityGroup
+          SubnetId: !Ref PublicSubnet
+      IamInstanceProfile: !Ref BastionInstanceProfile
+      UserData: 
+        Fn::Base64: !Sub |
+          #!/bin/bash
+
+          # Set up logging
+          LOG_FILE="/tmp/user-data-log-$(date +%Y-%m-%d).log"
+          exec > >(tee -a "$LOG_FILE") 2>&1
+
+          cd /tmp
+          echo "Starting user data script execution"
+
+          # Update and install necessary packages
+          yum update -y || { echo "Failed to update packages"; exit 1; }
+          yum install git -y || { echo "Failed to install git"; exit 1; }
+          yum install -y jq postgresql15 || { echo "Failed to install jq and postgresql15"; exit 1; }
+
+          # Get database credentials from Secrets Manager
+          DB_SECRET=$(aws secretsmanager get-secret-value --secret-id ${DatabaseSecret} --region ${AWS::Region} --query SecretString --output text)
+          DB_USERNAME=$(echo $DB_SECRET | jq -r .username)
+          DB_PASSWORD=$(echo $DB_SECRET | jq -r .password)
+          DB_ENDPOINT="${DBInstance.Endpoint.Address}"
+          DB_NAME="postgres"
+          DEFAULT_DB="postgres"
+
+          cat << 'EOF' > /tmp/setup_db.sql
+
+          CREATE TABLE sustainability_projects (
+              project_id SERIAL PRIMARY KEY,
+              project_name VARCHAR(100) NOT NULL,
+              project_description TEXT,
+              start_date DATE,
+              end_date DATE,
+              budget DECIMAL(10,2),
+              user_access VARCHAR(100)
+          );
+
+          CREATE TABLE sustainability_scores (
+              score_id SERIAL PRIMARY KEY,
+              project_id INT REFERENCES sustainability_projects(project_id),
+              sustainability_score INT CHECK (sustainability_score >= 0 AND sustainability_score <= 100),
+              status VARCHAR(50) CHECK (status IN ('Planned', 'In Progress', 'Completed')),
+              user_access VARCHAR(100)
+          );
+
+          CREATE TABLE stakeholders (
+              stakeholder_id SERIAL PRIMARY KEY,
+              stakeholder_name VARCHAR(100) NOT NULL,
+              stakeholder_role VARCHAR(50),
+              project_id INT REFERENCES sustainability_projects(project_id),
+              user_access VARCHAR(100)
+          );
+
+          INSERT INTO sustainability_projects (project_id, project_name, project_description, start_date, end_date, budget, user_access) 
+          VALUES 
+          (1, 'Solar Panel Installation', 'Install solar panels on the roof of the company headquarters.', '2022-03-01', '2022-09-30', 50000.00, 'alejandro_rosalez@example.org'),
+          (2, 'Waste Reduction Program', 'Implement a comprehensive waste management system to reduce landfill waste.', '2021-06-15', '2022-06-14', 25000.00, 'alejandro_rosalez@example.org'),
+          (3, 'Sustainable Forestry Initiative', 'Partner with a local forestry organization to plant and maintain a community forest.', '2023-01-01', '2025-12-31', 100000.00, 'alejandro_rosalez@example.org'),
+          (4, 'Energy Efficiency Upgrades', 'Upgrade the HVAC system and lighting to improve energy efficiency in the office building.', '2022-11-01', '2023-04-30', 75000.00, 'alejandro_rosalez@example.org'),
+          (5, 'Green Transportation Program', 'Provide incentives for employees to use public transportation or electric vehicles.', '2023-05-01', '2024-04-30', 30000.00, 'alejandro_rosalez@example.org'),
+          (6, 'Secret Sustainability Project', 'This is a confidential sustainability project that is not to be shared with the public.', '2023-05-01', '2024-04-30', 30000.00, 'richard_roe@example.org');
+
+          INSERT INTO sustainability_scores (project_id, sustainability_score, status, user_access) 
+          VALUES 
+          (1, 90, 'Completed', 'alejandro_rosalez@example.org'),
+          (2, 80, 'In Progress', 'alejandro_rosalez@example.org'),
+          (3, 75, 'Planned', 'alejandro_rosalez@example.org'),
+          (4, 85, 'In Progress', 'alejandro_rosalez@example.org'),
+          (5, 70, 'Planned', 'alejandro_rosalez@example.org'),
+          (6, 99, 'Completed', 'richard_roe@example.org');
+
+          INSERT INTO stakeholders (stakeholder_name, stakeholder_role, project_id, user_access) 
+          VALUES 
+          ('John Doe', 'Project Manager', 1, 'alejandro_rosalez@example.org'),
+          ('Jane Smith', 'Sustainability Coordinator', 2, 'alejandro_rosalez@example.org'),
+          ('Robert Johnson', 'Environmental Consultant', 3, 'alejandro_rosalez@example.org'),
+          ('Emily Williams', 'Energy Efficiency Specialist', 4, 'alejandro_rosalez@example.org'),
+          ('Michael Brown', 'Transportation Coordinator', 5, 'alejandro_rosalez@example.org'),
+          ('Secret Stakeholder', 'Confidential Sustainability Advisor', 6, 'richard_roe@example.org');
+
+          SELECT * FROM sustainability_projects; 
+          SELECT * FROM sustainability_scores; 
+          SELECT * FROM stakeholders;
+
+          EOF
+
+          # Run the database setup script
+          PGPASSWORD=$DB_PASSWORD psql -h $DB_ENDPOINT -U $DB_USERNAME -d $DEFAULT_DB -f /tmp/setup_db.sql || { echo "Failed to set up database"; exit 1; }
+
+          # Clean up
+          echo "User data script execution completed"
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows SSH access to the bastion host
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BastionRole
+
+  BastionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonRDSReadOnlyAccess
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DatabaseSecret
+
+Outputs:
+  VPC:
+    Description: A reference to the created VPC
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${AWS::StackName}-VPC
+
+  PublicSubnet:
+    Description: A reference to the public subnet
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicSubnet
+
+  PrivateSubnet1:
+    Description: A reference to the first private subnet
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub ${AWS::StackName}-PrivateSubnet1
+
+  PrivateSubnet2:
+    Description: A reference to the second private subnet
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub ${AWS::StackName}-PrivateSubnet2
+
+
+  DBEndpoint:
+    Description: The DB endpoint
+    Value: !GetAtt DBInstance.Endpoint.Address
+
+  BastionInstanceId:
+    Description: The ID of the bastion host EC2 instance
+    Value: !Ref BastionInstance
+
+  DatabaseSecretARN:
+    Description: The ARN of the database credentials secret
+    Value: !Ref DatabaseSecret
