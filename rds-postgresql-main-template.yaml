@@ -14,9 +14,9 @@ Parameters:
     Type: AWS::EC2::KeyPair::KeyName
     Description: Name of an existing EC2 KeyPair to enable SSH access to the bastion host
 
-  Conditions:
-    IsUsWest2: !Equals [!Ref 'AWS::Region', 'us-west-2']
-    IsUsEast1: !Equals [!Ref 'AWS::Region', 'us-east-1']
+Conditions:
+  IsUsWest2: !Equals [!Ref 'AWS::Region', 'us-west-2']
+  IsUsEast1: !Equals [!Ref 'AWS::Region', 'us-east-1']
 
 Resources:
   # VPC and Networking components
