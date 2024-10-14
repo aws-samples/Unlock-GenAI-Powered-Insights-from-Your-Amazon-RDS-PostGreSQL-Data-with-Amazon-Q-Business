@@ -19,6 +19,10 @@ The template sets up the following components:
 10. IAM role and instance profile for the bastion host
 11. Secrets Manager secret for storing database credentials
 
+## [About test data](#abouttestdata)
+
+The test data represents a sustainability management system that tracks various sustainability projects, their scores, and the stakeholders involved. Richard Roe, the Secrets Projects Custodian, has access only to the "Secret Sustainability Project" (project_id 6), while Alejandro Rosalez, the General Projects Custodian, has access to all the general sustainability projects (project_id 1-5) but not the secret project. The data shows that there are 6 sustainability projects in total, allowing example.org to manage and monitor their sustainability initiatives while maintaining the confidentiality of the sensitive project based on the different access levels for Richard and Alejandro.
+
 ## [Prerequisites](#prerequisites)
 
 Before deploying this template, ensure you have:
