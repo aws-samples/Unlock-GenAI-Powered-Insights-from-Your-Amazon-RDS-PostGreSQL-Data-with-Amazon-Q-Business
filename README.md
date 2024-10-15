@@ -1,4 +1,4 @@
-# Unlock Gen-AI Powered Insights from Your Amazon RDS (PostgreSQL) Data with Amazon Q Business
+# Unlock Gen-AI Powered Insights from Your Amazon RDS PostgreSQL Data with Amazon Q Business
 
 ## [Overview](#overview)
 This CloudFormation template sets up the infrastructure required to enable Amazon Q Business to connect to and analyze data from an Amazon RDS (PostgreSQL) database. Specifically, the template performs the following tasks:
