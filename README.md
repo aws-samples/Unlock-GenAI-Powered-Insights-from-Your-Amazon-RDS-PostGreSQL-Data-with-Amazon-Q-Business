@@ -1,9 +1,21 @@
 # Unlock Gen-AI Powered Insights from Your Amazon RDS (PostgreSQL) Data with Amazon Q Business
 
 ## [Overview](#overview)
-This CloudFormation template creates a VPC with public and private subnets, a PostgreSQL RDS instance in the private subnet, and a bastion host EC2 instance in the public subnet.
+This CloudFormation template sets up the infrastructure required to enable Amazon Q Business to connect to and analyze data from an Amazon RDS (PostgreSQL) database. Specifically, the template performs the following tasks:
 
-## [Architecture](#architecture)
+1. Creates a VPC with public and private subnets to host the resources.
+2. Deploys a PostgreSQL RDS instance in a private subnet, ensuring it is not publicly accessible.
+3. Provisions a bastion host EC2 instance in the public subnet, which can be used to securely access the RDS instance.
+4. Generates a Secrets Manager secret to store the database credentials, ensuring they are protected and can be easily retrieved.
+5. Initializes the PostgreSQL database with sample/test data, including tables for sustainability projects, sustainability scores, and stakeholders.
+
+The goal of this infrastructure is to provide a secure and ready-to-use environment for users to connect Amazon Q Business to the RDS PostgreSQL database and unlock valuable insights from the sample sustainability data. By automating the provisioning of these resources, users can quickly set up the necessary foundation to explore the capabilities of Amazon Q Business.
+
+## [About test data](#abouttestdata)
+The test data represents a sustainability management system that tracks various sustainability projects, their scores, and the stakeholders involved. Richard Roe, the Secrets Projects Custodian, has access only to the "Secret Sustainability Project" (project_id 6), while Alejandro Rosalez, the General Projects Custodian, has access to all the general sustainability projects (project_id 1-5) but not the secret project. The data shows that there are 6 sustainability projects in total, allowing example.org to manage and monitor their sustainability initiatives while maintaining the confidentiality of the sensitive project based on the different access levels for Richard and Alejandro.
+The SQL statements to create the tables and insert the test data are provided in the [test-data.sql](test-data.sql) file. You can review the contents of this file to familiarize yourself with the test data schema and sample records.
+
+## [Resources Created](#resources-created)
 
 The template sets up the following components:
 
@@ -19,16 +31,12 @@ The template sets up the following components:
 10. IAM role and instance profile for the bastion host
 11. Secrets Manager secret for storing database credentials
 
-## [About test data](#abouttestdata)
-
-The test data represents a sustainability management system that tracks various sustainability projects, their scores, and the stakeholders involved. Richard Roe, the Secrets Projects Custodian, has access only to the "Secret Sustainability Project" (project_id 6), while Alejandro Rosalez, the General Projects Custodian, has access to all the general sustainability projects (project_id 1-5) but not the secret project. The data shows that there are 6 sustainability projects in total, allowing example.org to manage and monitor their sustainability initiatives while maintaining the confidentiality of the sensitive project based on the different access levels for Richard and Alejandro.
-
 ## [Prerequisites](#prerequisites)
 
 Before deploying this template, ensure you have:
 
-1. An AWS account with sufficient permissions to create the resources
-2. AWS CLI installed and configured
+1. An AWS account with sufficient permissions to create the above listed resources
+2. AWS CLI installed and configured (Optional, if you are using the AWS Session manager to connect to EC2 Instance)
 3. An existing EC2 Key Pair for SSH access to the bastion host
 
 ## [Creating RDS Certificates for SSL Connection](#creating-rds-certificates-for-ssl-connection)
@@ -60,6 +68,11 @@ To establish a connection from Amazon Q to the Amazon RDS PostgreSQL instance, y
 
 ## [Cloudformation deployment](#cloudformation-deployment)
 
+## [Security Considerations](#security-considerations)
+
+- The bastion host security group allows SSH access from any IP (0.0.0.0/0). Consider restricting this to specific IP ranges for improved security.
+- Regularly rotate the database credentials and EC2 key pair.
+
 ## [Clone the Repository](#clone-the-repository)
 
 1. Clone the repository:
@@ -78,7 +91,7 @@ To establish a connection from Amazon Q to the Amazon RDS PostgreSQL instance, y
 
 ## [Deployment](#deployment)
 
-### [Using the AWS Console](#using-the-aws-console)
+### [Option1: Using the AWS Console](#using-the-aws-console)
 1. Log in to the AWS Management Console.
 2. Navigate to the CloudFormation service.
 3. Click "Create stack" and select "With new resources (standard)".
@@ -86,7 +99,7 @@ To establish a connection from Amazon Q to the Amazon RDS PostgreSQL instance, y
 5. Fill in the required parameters, such as the database username and key pair name.
 6. Review the stack details and create the stack.
 
-### [Using the AWS CLI](#using-the-aws-cli)
+### [Option2: Using the AWS CLI](#using-the-aws-cli)
 
 To deploy this CloudFormation stack:
 1. Save the template to a file (e.g., `rds-postgresql-main-template`)
@@ -120,24 +133,55 @@ The template provides the following outputs:
 To verify the deployment, you can do the following:
 
 1. Check the CloudFormation stack status in the AWS Management Console or by running `aws cloudformation describe-stacks --stack-name my-vpc-rds-bastion`.
-2. Connect to the bastion host instance using the specified key pair and verify that you can access the RDS instance from the bastion host.
+2. Connect to the bastion host instance using the specified key pair or through session manager, and verify the file under /tmp/user-data-* to confirm the status of the table setup
 3. Use the RDS endpoint and database credentials (stored in AWS Secrets Manager) to connect to the Postgres database and validate the sample data.
 
-## [Security Considerations](#security-considerations)
+```bash
+psql \
+   --host=RDSENDPOINT \
+   --port=5432 \
+   --username=DBUSER \
+   --password \
+   --dbname=postgres \
+   --set=sslmode=require
 
-- The bastion host security group allows SSH access from any IP (0.0.0.0/0). Consider restricting this to specific IP ranges for improved security.
-- Regularly rotate the database credentials and EC2 key pair.
+# Execute the following SQL commands to display the contents of the tables
+SELECT * FROM sustainability_projects; 
+SELECT * FROM sustainability_scores;
+SELECT * FROM stakeholders;
+```
+
+
+
 
 ## [Cleanup](#cleanup)
 
 To avoid ongoing charges, delete the CloudFormation stack when you're done using the resources.
 
-1. Delete the CloudFormation stack:
+1. Remove the `AmazonS3ReadOnlyAccess` policy from the IAM role created by the CloudFormation stack:
+   - Navigate to the IAM service in the AWS Management Console.
+   - Locate the IAM role with a name starting with `QBusiness-DataSource-`.
+   - Remove the `AmazonS3ReadOnlyAccess` managed policy from the role.
+
+2. Delete the CloudFormation stack:
+   Option1: From AWS Console
+   - Go to the CloudFormation service in the AWS Management Console.
+   - Find the stack you created (e.g., "my-vpc-rds-bastion").
+   - Select the stack and click "Delete".
+   
+   Option2: Using AWS CLI
    ```
    aws cloudformation delete-stack --stack-name my-vpc-rds-bastion
    ```
 
-2. Manually delete the database secrets from Secrets Manager (if needed):
+3. Manually delete the database secrets from Secrets Manager:
+   Option1: From AWS Console
+   - Navigate to the Secrets Manager service in the AWS Management Console.
+   - Locate the secret with a name starting with "QBusiness-".
+   - Click on the secret and select "Delete secret" and shedule for deletion. 
+   - Secrets Manager requires a minimum waiting period of 7 days before deleting a secret. You will not be able to retrieve the secret once it is scheduled for deletion.
+
+   Option2: AWS CLI to delete immeditely
    ```
    aws secretsmanager delete-secret --secret-id QBusiness-<<Name of the Secret>> --force-delete-without-recovery
    ```
@@ -149,4 +193,3 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This library is licensed under the MIT-0 License. See the LICENSE file.
-
