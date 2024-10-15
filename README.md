@@ -12,10 +12,12 @@ This CloudFormation template sets up the infrastructure required to enable Amazo
 The goal of this infrastructure is to provide a secure and ready-to-use environment for users to connect Amazon Q Business to the RDS PostgreSQL database and unlock valuable insights from the sample sustainability data. By automating the provisioning of these resources, users can quickly set up the necessary foundation to explore the capabilities of Amazon Q Business.
 
 ## [About test data](#abouttestdata)
+
 The test data represents a sustainability management system that tracks various sustainability projects, their scores, and the stakeholders involved. Richard Roe, the Secrets Projects Custodian, has access only to the "Secret Sustainability Project" (project_id 6), while Alejandro Rosalez, the General Projects Custodian, has access to all the general sustainability projects (project_id 1-5) but not the secret project. The data shows that there are 6 sustainability projects in total, allowing example.org to manage and monitor their sustainability initiatives while maintaining the confidentiality of the sensitive project based on the different access levels for Richard and Alejandro.
+
 The SQL statements to create the tables and insert the test data are provided in the [test-data.sql](test-data.sql) file. You can review the contents of this file to familiarize yourself with the test data schema and sample records.
 
-## [Resources Created](#resources-created)
+## [Template creates following AWS resources](#resources-created)
 
 The template sets up the following components:
 
@@ -65,8 +67,6 @@ To establish a connection from Amazon Q to the Amazon RDS PostgreSQL instance, y
    ```
 
 5. Upload the `rds-ca-rsa2048-g1.pem` file to an S3 bucket and note down the path. AWS CLI command aws s3 cp rds-ca-rsa2048-g1.pem s3://$BUCKET_NAME/
-
-## [Cloudformation deployment](#cloudformation-deployment)
 
 ## [Security Considerations](#security-considerations)
 
