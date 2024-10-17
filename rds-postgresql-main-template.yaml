@@ -228,6 +228,8 @@ Resources:
           yum update -y || { echo "Failed to update packages"; exit 1; }
           yum install git -y || { echo "Failed to install git"; exit 1; }
           yum install -y jq postgresql15 || { echo "Failed to install jq and postgresql15"; exit 1; }
+          dnf update -y || { echo "Failed to update packages"; exit 1; }
+          dnf install -y git jq postgresql15 || { echo "Failed to install required packages"; exit 1; }
 
           # Get database credentials from Secrets Manager
           DB_SECRET=$(aws secretsmanager get-secret-value --secret-id ${DatabaseSecret} --region ${AWS::Region} --query SecretString --output text)
