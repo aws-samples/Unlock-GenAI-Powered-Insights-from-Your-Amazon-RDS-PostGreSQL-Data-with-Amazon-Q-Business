@@ -1,4 +1,4 @@
-# Unlock Gen-AI Powered Insights from Your Amazon RDS PostgreSQL Data with Amazon Q Business
+# Unlock Gen-AI Powered Insights from Your Amazon RDS (PostgreSQL) Data with Amazon Q Business
 
 ## [Overview](#overview)
 This CloudFormation template sets up the infrastructure required to enable Amazon Q Business to connect to and analyze data from an Amazon RDS (PostgreSQL) database. Specifically, the template performs the following tasks:
@@ -41,33 +41,6 @@ Before deploying this template, ensure you have:
 2. AWS CLI installed and configured (Optional, if you are using the AWS Session manager to connect to EC2 Instance)
 3. An existing EC2 Key Pair for SSH access to the bastion host
 
-## [Creating RDS Certificates for SSL Connection](#creating-rds-certificates-for-ssl-connection)
-
-To establish a connection from Amazon Q to the Amazon RDS PostgreSQL instance, you need to have the Amazon RDS certificates in an S3 bucket. Follow these steps to extract the region-specific certificate and upload it to an S3 bucket:
-
-1. Create an S3 bucket to store the SSL certificates:
-   ```
-   BUCKET_NAME="my-rds-ssl-certificates-$(date +%s)"
-   aws s3 mb s3://$BUCKET_NAME
-   ```
-
-2. Download the global bundle of SSL/TLS certificates from Amazon RDS:
-   ```
-   wget https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-   ```
-3. Convert the certificate bundle from CRL format to PEM format:
-   ```
-   openssl crl2pkcs7 -nocrl -certfile global-bundle.pem | openssl pkcs7 -print_certs -out all-certs.pem
-   ```
-<span style="background-color: grey; font-weight: bold;">The region in the grep command below should be the region where the RDS resides.</span>
-
-4. Extract the RDS Root CA certificate (RSA 2048-bit, G1) from the certificate bundle:
-   ```
-   grep -A 25 "CN=Amazon RDS us-east-1 Root CA RSA2048 G1" all-certs.pem | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' > rds-ca-rsa2048-g1.pem
-   ```
-
-5. Upload the `rds-ca-rsa2048-g1.pem` file to an S3 bucket and note down the path. AWS CLI command aws s3 cp rds-ca-rsa2048-g1.pem s3://$BUCKET_NAME/
-
 ## [Security Considerations](#security-considerations)
 
 - The bastion host security group allows SSH access from any IP (0.0.0.0/0). Consider restricting this to specific IP ranges for improved security.
@@ -95,7 +68,7 @@ To establish a connection from Amazon Q to the Amazon RDS PostgreSQL instance, y
 1. Log in to the AWS Management Console.
 2. Navigate to the CloudFormation service.
 3. Click "Create stack" and select "With new resources (standard)".
-4. Choose "Upload a template file" and select the CloudFormation script.
+4. Choose "Upload a template file" and select the CloudFormation script(rds-postgresql-main-template.yaml).
 5. Fill in the required parameters, such as the database username and key pair name.
 6. Review the stack details and create the stack.
 
@@ -151,6 +124,34 @@ SELECT * FROM sustainability_scores;
 SELECT * FROM stakeholders;
 ```
 
+## [Creating RDS Certificates for SSL Connection](#creating-rds-certificates-for-ssl-connection)
+
+To establish a connection from Amazon Q to the Amazon RDS PostgreSQL instance, you need to have the Amazon RDS certificates in an S3 bucket. 
+Note: The following commands can be executed on the Bastion EC2 host, [AWS CloudShell](https://aws.amazon.com/cloudshell/), or on your local machine, depending on your preference and setup.
+Follow these steps to extract the region-specific certificate and upload it to an S3 bucket:
+
+1. Create an S3 bucket to store the SSL certificates:
+   ```
+   BUCKET_NAME="my-rds-ssl-certificates-$(date +%s)"
+   aws s3 mb s3://$BUCKET_NAME
+   ```
+
+2. Download the global bundle of SSL/TLS certificates from Amazon RDS:
+   ```
+   wget https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+   ```
+3. Convert the certificate bundle from CRL format to PEM format:
+   ```
+   openssl crl2pkcs7 -nocrl -certfile global-bundle.pem | openssl pkcs7 -print_certs -out all-certs.pem
+   ```
+<span style="background-color: grey; font-weight: bold;">The region in the grep command below should be the region where the RDS resides.</span>
+
+4. Extract the RDS Root CA certificate (RSA 2048-bit, G1) from the certificate bundle:
+   ```
+   grep -A 25 "CN=Amazon RDS us-east-1 Root CA RSA2048 G1" all-certs.pem | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' > rds-ca-rsa2048-g1.pem
+   ```
+
+5. Upload the `rds-ca-rsa2048-g1.pem` file to an S3 bucket and note down the path. AWS CLI command aws s3 cp rds-ca-rsa2048-g1.pem s3://$BUCKET_NAME/
 
 
 
